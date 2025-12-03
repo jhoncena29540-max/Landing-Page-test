@@ -26,7 +26,7 @@ import {
   Menu, X, Wand2, Layout, CheckCircle, 
   LogOut, Rocket, Globe, Save, Loader2,
   ChevronRight, Star, Shield, Zap, Mail, ArrowRight,
-  Copy, Check, Code, Smartphone, Eye
+  Copy, Check, Code, Smartphone, Eye, Terminal, Lock
 } from 'lucide-react';
 
 // --- Types ---
@@ -62,6 +62,35 @@ interface GeneratedSiteContent {
   mobileFirst: boolean;
   notes: string;
 }
+
+// --- Constants ---
+
+const PRO_PROMPTS = [
+  {
+    label: "SaaS Product Launch",
+    text: "Create a modern high-converting SaaS landing page for a project management tool called 'TaskFlow'. Sections: Hero with dashboard mockup, Features grid with icons, Social Proof with client logos, Pricing (Free, Pro, Enterprise), FAQ, and a clear CTA to Start Free Trial. Style: Clean, Minimalist, Blue and White palette."
+  },
+  {
+    label: "Mobile App Showcase",
+    text: "Create a vibrant mobile app landing page for a fitness tracking application called 'FitTrack'. Sections: Hero with app screenshot, 'How it works' 3-step process, User Testimonials, and Download buttons for App Store and Play Store. Style: Dark mode, neon accents, energetic."
+  },
+  {
+    label: "E-Book / Lead Magnet",
+    text: "Create a lead generation landing page for a free E-book titled 'The Ultimate Guide to AI Marketing'. Sections: Hero with book cover 3D mockup, 'What you'll learn' bullet points, Author bio, and a prominent Email Capture form. Style: Professional, trustworthy, serif fonts."
+  },
+  {
+    label: "Agency Portfolio",
+    text: "Create a creative portfolio landing page for a digital design agency. Sections: Hero with big bold typography, Selected Work grid (placeholders), Services list, Team section, and Contact form. Style: Artistic, bold, plenty of whitespace."
+  },
+  {
+    label: "Waitlist Page",
+    text: "Create a viral waitlist landing page for a stealth startup. Sections: Mysterious Hero with countdown timer placeholder, 'Why join?' value props, and a viral referral gamification explanation. Style: Futuristic, gradient background."
+  },
+  {
+    label: "Coffee Shop Local Business",
+    text: "Create a cozy, warm landing page for an artisanal coffee shop. Sections: Hero with cafe ambience image, Menu highlights, Location/Hours, and 'Order Online' CTA. Style: Earthy tones, browns and creams, inviting."
+  }
+];
 
 // --- Gemini AI Setup ---
 const ai = new GoogleGenAI({ apiKey: "AIzaSyAWE6sCwZZZP3V-K-gHIeqNQh_z6uuk6eE" });
@@ -152,12 +181,12 @@ const Auth = ({ type, onSuccess, onToggle }: { type: 'signin' | 'signup', onSucc
     try {
       if (type === 'signup') {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        // Create user document in Firestore "users" collection
+        // Create user document in Firestore "users" collection with DEFAULT 'user' role
         await setDoc(doc(db, "users", userCredential.user.uid), {
           uid: userCredential.user.uid,
           email: userCredential.user.email,
           createdAt: serverTimestamp(),
-          role: 'user'
+          role: 'user' // Default role
         });
       } else {
         await signInWithEmailAndPassword(auth, email, password);
@@ -236,13 +265,14 @@ const Auth = ({ type, onSuccess, onToggle }: { type: 'signin' | 'signup', onSucc
 
 // --- Dashboard / Tool ---
 
-const Dashboard = ({ user }: { user: User }) => {
+const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [currentSite, setCurrentSite] = useState<SiteData | null>(null);
   const [sites, setSites] = useState<SiteData[]>([]);
   const [view, setView] = useState<'editor' | 'list'>('list');
   const [copied, setCopied] = useState(false);
+  const [showDevTools, setShowDevTools] = useState(false);
 
   useEffect(() => {
     fetchSites();
@@ -405,6 +435,52 @@ const Dashboard = ({ user }: { user: User }) => {
 
   return (
     <div className="flex h-screen bg-gray-50 font-sans">
+      {/* Dev Tools Modal - Admin Only */}
+      {showDevTools && userRole === 'admin' && (
+        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+             <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+                <div className="flex items-center gap-2">
+                   <div className="bg-purple-100 p-2 rounded-lg text-purple-600">
+                     <Terminal size={20} />
+                   </div>
+                   <div>
+                     <h3 className="font-bold text-gray-900">Developer Console</h3>
+                     <p className="text-xs text-gray-500">Admin Privileges Active</p>
+                   </div>
+                </div>
+                <button onClick={() => setShowDevTools(false)} className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-700 transition-colors"><X size={20}/></button>
+             </div>
+             <div className="p-6 overflow-y-auto bg-gray-50/30">
+                <div className="mb-4 flex items-center gap-2 text-sm text-purple-800 bg-purple-50 p-3 rounded-lg border border-purple-100">
+                   <Lock size={16} className="shrink-0" />
+                   <span>Admin-Only Prompt Templates. These are hidden from standard users.</span>
+                </div>
+                <div className="grid grid-cols-1 gap-3">
+                   {PRO_PROMPTS.map((p, i) => (
+                      <button 
+                        key={i} 
+                        onClick={() => { 
+                          setPrompt(p.text); 
+                          setView('editor'); 
+                          setCurrentSite(null); 
+                          setShowDevTools(false); 
+                        }} 
+                        className="group flex flex-col text-left p-4 bg-white border border-gray-200 rounded-xl hover:border-purple-500 hover:ring-1 hover:ring-purple-500 hover:shadow-md transition-all"
+                      >
+                         <div className="flex items-center justify-between mb-1">
+                           <span className="font-bold text-gray-800 group-hover:text-purple-600 transition-colors">{p.label}</span>
+                           <ArrowRight size={16} className="text-gray-300 group-hover:text-purple-500 opacity-0 group-hover:opacity-100 transition-all transform group-hover:translate-x-1" />
+                         </div>
+                         <div className="text-xs text-gray-500 leading-relaxed line-clamp-2">{p.text}</div>
+                      </button>
+                   ))}
+                </div>
+             </div>
+          </div>
+        </div>
+      )}
+
       {/* Sidebar */}
       <aside className="w-72 bg-white border-r border-gray-200 flex flex-col z-20 shadow-sm">
         <div className="p-6 border-b border-gray-100">
@@ -429,6 +505,21 @@ const Dashboard = ({ user }: { user: User }) => {
             <Wand2 size={20} />
             Create New
           </button>
+          
+          {/* Developer Mode Button - Admin Only */}
+          {userRole === 'admin' && (
+            <div className="pt-2 mt-2 border-t border-gray-100">
+               <button 
+                 onClick={() => setShowDevTools(true)}
+                 className="w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 transition-colors text-gray-600 hover:bg-gray-900 hover:text-white group"
+               >
+                 <div className="p-1 rounded bg-gray-100 group-hover:bg-gray-700 transition-colors">
+                   <Terminal size={16} />
+                 </div>
+                 <span className="font-medium text-sm">Developer Mode</span>
+               </button>
+            </div>
+          )}
         </nav>
 
         <div className="p-4 border-t border-gray-100">
@@ -436,7 +527,10 @@ const Dashboard = ({ user }: { user: User }) => {
              <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold">
                 {user.email?.charAt(0).toUpperCase()}
              </div>
-             <div className="text-sm text-gray-700 truncate flex-1 font-medium">{user.email}</div>
+             <div className="flex-1 overflow-hidden">
+                <div className="text-sm text-gray-700 truncate font-medium">{user.email}</div>
+                <div className="text-xs text-gray-400 capitalize">{userRole} Account</div>
+             </div>
           </div>
           <button 
             onClick={() => signOut(auth)}
@@ -526,7 +620,15 @@ const Dashboard = ({ user }: { user: User }) => {
                 <button onClick={() => setView('list')} className="text-gray-500 hover:text-gray-800 text-sm flex items-center gap-1 mb-6 transition-colors">
                   <ChevronRight size={16} className="rotate-180" /> Back to Dashboard
                 </button>
-                <h2 className="text-2xl font-bold mb-2">AI Generator</h2>
+                <div className="flex justify-between items-center mb-2">
+                  <h2 className="text-2xl font-bold">AI Generator</h2>
+                  {/* Pro Prompts Button - Admin Only */}
+                  {userRole === 'admin' && (
+                    <button onClick={() => setShowDevTools(true)} className="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded hover:bg-purple-100 flex items-center gap-1">
+                      <Terminal size={12}/> Admin Tools
+                    </button>
+                  )}
+                </div>
                 <p className="text-sm text-gray-500 leading-relaxed">
                   Describe your product, service, or idea. The AI will generate a complete landing page structure for you.
                 </p>
@@ -660,6 +762,11 @@ const Dashboard = ({ user }: { user: User }) => {
                       </div>
                       <h3 className="text-xl font-bold text-gray-900 mb-2">Ready to Build</h3>
                       <p className="max-w-md text-center">Enter a prompt in the sidebar to generate your first landing page.</p>
+                      {userRole === 'admin' && (
+                        <button onClick={() => setShowDevTools(true)} className="mt-4 text-purple-600 text-sm hover:underline flex items-center gap-1">
+                            <Terminal size={14} /> Open Admin Console
+                        </button>
+                      )}
                     </div>
                   )}
                </div>
@@ -909,6 +1016,7 @@ const LandingPage = ({ onGetStarted, onSignIn }: { onGetStarted: () => void, onS
 
 const App = () => {
   const [user, setUser] = useState<User | null>(null);
+  const [userRole, setUserRole] = useState<string>('user');
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'landing' | 'auth' | 'dashboard' | 'public_site'>('landing');
   const [authType, setAuthType] = useState<'signin' | 'signup'>('signin');
@@ -958,15 +1066,28 @@ const App = () => {
       return false; 
     };
 
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
+      
+      if (currentUser) {
+        // Fetch user role from Firestore
+        try {
+          const userRef = doc(db, "users", currentUser.uid);
+          const userSnap = await getDoc(userRef);
+          if (userSnap.exists()) {
+            const userData = userSnap.data();
+            setUserRole(userData.role || 'user');
+          }
+        } catch (e) {
+          console.error("Error fetching user role:", e);
+        }
+      }
+
       // Only navigate if we aren't viewing a public site
       if (!window.location.hash.startsWith('#p/')) {
         if (currentUser) {
           setView('dashboard');
         } else {
-          // If we were on auth, stay on auth (or landing if preferred)
-          // Here we default to landing if logged out, unless explicitly in auth flow
           if(view !== 'auth') setView('landing');
         }
       }
@@ -980,7 +1101,7 @@ const App = () => {
       unsubscribe();
       window.removeEventListener('hashchange', checkHash);
     };
-  }, [view]); // Dependency on view to ensure correct transitions
+  }, [view]);
 
   if (loading) {
     return <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 text-gray-500">
@@ -1014,7 +1135,7 @@ const App = () => {
 
   // Dashboard
   if (user && view === 'dashboard') {
-    return <Dashboard user={user} />;
+    return <Dashboard user={user} userRole={userRole} />;
   }
 
   // Fallback / Landing
