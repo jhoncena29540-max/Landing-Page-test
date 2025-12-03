@@ -64,7 +64,7 @@ interface GeneratedSiteContent {
 }
 
 // --- Gemini AI Setup ---
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const ai = new GoogleGenAI({ apiKey: "AIzaSyAWE6sCwZZZP3V-K-gHIeqNQh_z6uuk6eE" });
 
 // --- Components ---
 
