@@ -1165,11 +1165,6 @@ const App = () => {
     return (
         <div className="w-full h-screen">
             <GeneratedSiteRenderer content={publicSiteData} />
-            <div className="fixed bottom-4 right-4 z-50">
-               <a href="/" className="bg-black text-white px-4 py-2 rounded-full text-xs font-bold shadow-lg opacity-50 hover:opacity-100 transition-opacity flex items-center gap-2">
-                 <Zap size={12} fill="currentColor"/> Built with LaunchAI
-               </a>
-            </div>
         </div>
     );
   }
