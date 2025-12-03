@@ -156,7 +156,7 @@ const GeneratedSiteRenderer = ({ content }: { content: GeneratedSiteContent }) =
   return (
     <iframe 
       ref={iframeRef} 
-      className="w-full h-full border-0 bg-white shadow-inner"
+      className="w-full h-full border-0 bg-white"
       title="Site Preview"
       sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
     />
@@ -424,8 +424,9 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
 
   const copyLink = () => {
     if(!currentSite?.id) return;
-    // New URL structure: #p/{userId}/{siteId}
-    const url = `${window.location.origin}/#p/${user.uid}/${currentSite.id}`;
+    // New URL structure: #p/{userId}/{siteId}/{slug}
+    const slug = currentSite.content.slug || 'web-page';
+    const url = `${window.location.origin}/#p/${user.uid}/${currentSite.id}/${slug}`;
     navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -618,7 +619,7 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
                       </button>
                       {site.isPublished && (
                          <a 
-                           href={`#p/${site.userId}/${site.id}`}
+                           href={`#p/${site.userId}/${site.id}/${site.content.slug || 'site'}`}
                            target="_blank"
                            rel="noreferrer"
                            className="flex-1 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-100 text-center transition-all"
@@ -725,12 +726,12 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
                                    <div className="text-xs font-bold text-blue-600 uppercase mb-1">Public Preview URL</div>
                                    <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-blue-200 text-xs text-gray-600 shadow-sm">
                                      <Globe size={12} className="text-blue-400 shrink-0" />
-                                     <span className="truncate flex-1">{window.location.origin}/#p/{user.uid}/{currentSite.id}</span>
+                                     <span className="truncate flex-1">{window.location.origin}/#p/{user.uid}/{currentSite.id}/{currentSite.content.slug || 'site'}</span>
                                      <button onClick={copyLink} className="p-1 hover:bg-gray-100 rounded text-gray-500 transition-colors">
                                        {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
                                      </button>
                                    </div>
-                                   <a href={`/#p/${user.uid}/${currentSite.id}`} target="_blank" className="block text-center text-xs text-blue-600 hover:underline mt-2">Open in New Tab</a>
+                                   <a href={`/#p/${user.uid}/${currentSite.id}/${currentSite.content.slug || 'site'}`} target="_blank" className="block text-center text-xs text-blue-600 hover:underline mt-2">Open in New Tab</a>
                                 </div>
                             </div>
                          ) : (
@@ -1058,6 +1059,7 @@ const App = () => {
   const [user, setUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<string>('user');
   const [loading, setLoading] = useState(true);
+  const [loadingTitle, setLoadingTitle] = useState("LaunchAI"); // State for custom loading text
   const [view, setView] = useState<'landing' | 'auth' | 'dashboard' | 'public_site'>(
     // Initialize view state based on hash to avoid flash of landing page
     window.location.hash.startsWith('#p/') ? 'public_site' : 'landing'
@@ -1069,12 +1071,23 @@ const App = () => {
     // Hash Routing Logic for Public Sites
     const checkHash = async () => {
       const hash = window.location.hash;
-      // New format: #p/{userId}/{siteId}
+      // New format: #p/{userId}/{siteId}/{slug}
       if (hash.startsWith('#p/')) {
         // If we are already viewing public site, loading handles itself, otherwise ensure loading is on
         if(view !== 'public_site') setLoading(true);
         
         const parts = hash.replace('#p/', '').split('/');
+        
+        // Optimistic Title Setting from URL Slug
+        if (parts.length >= 3) {
+             const slug = parts[2];
+             // Format slug: my-cool-site -> My Cool Site
+             const formattedTitle = slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+             setLoadingTitle(formattedTitle);
+        } else {
+             setLoadingTitle("Site");
+        }
+
         if (parts.length >= 2) {
            const userId = parts[0];
            const siteId = parts[1];
@@ -1088,6 +1101,8 @@ const App = () => {
                 const data = docSnap.data() as SiteData;
                 if (data.isPublished) {
                   setPublicSiteData(data.content);
+                  // Update tab title
+                  document.title = data.content.title;
                   setView('public_site');
                 } else {
                   alert("This site is not yet published by the author.");
@@ -1156,7 +1171,7 @@ const App = () => {
   if (loading) {
     return <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 text-gray-500">
       <Loader2 size={48} className="animate-spin text-blue-600 mb-4" />
-      <p className="animate-pulse">Loading LaunchAI...</p>
+      <p className="animate-pulse text-lg font-medium">Loading {loadingTitle}...</p>
     </div>;
   }
 
