@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type, Schema } from "@google/genai";
@@ -24,10 +23,24 @@ import {
   Menu, X, Wand2, Layout, CheckCircle, 
   LogOut, Rocket, Globe, Save, Loader2,
   ChevronRight, Star, Shield, Zap, Mail, ArrowRight,
-  Copy, Check, Code, Smartphone, Eye, Terminal, Lock, Download
+  Copy, Check, Code, Smartphone, Eye, Terminal, Lock, Download,
+  ShieldCheck, RefreshCw, AlertCircle
 } from 'lucide-react';
 
 // --- Types ---
+
+interface DnsRecord {
+  type: 'A' | 'CNAME' | 'TXT';
+  name: string;
+  value: string;
+}
+
+interface CustomDomainConfig {
+  domain: string;
+  status: 'pending' | 'verified' | 'failed';
+  dnsRecords: DnsRecord[];
+  verifiedAt?: any;
+}
 
 interface SiteData {
   id?: string;
@@ -37,6 +50,7 @@ interface SiteData {
   content: GeneratedSiteContent;
   isPublished: boolean;
   createdAt: any;
+  customDomain?: CustomDomainConfig;
 }
 
 interface GeneratedSiteContent {
@@ -261,6 +275,146 @@ const Auth = ({ type, onSuccess, onToggle }: { type: 'signin' | 'signup', onSucc
   );
 };
 
+// --- Domain Manager Component ---
+const DomainManager = ({ site, user, onUpdate }: { site: SiteData, user: User, onUpdate: (s: SiteData) => void }) => {
+  const [domainInput, setDomainInput] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
+
+  const handleConnect = async () => {
+    if (!domainInput.trim()) return;
+    
+    // Generate Mock DNS Records
+    const records: DnsRecord[] = [
+      { type: 'A', name: '@', value: '75.2.60.5' },
+      { type: 'CNAME', name: 'www', value: 'custom.launchai.com' },
+      { type: 'TXT', name: '@', value: `launchai-verification=${site.id}` }
+    ];
+
+    const config: CustomDomainConfig = {
+      domain: domainInput,
+      status: 'pending',
+      dnsRecords: records
+    };
+
+    try {
+       await updateDoc(doc(db, "users", user.uid, "sites", site.id!), {
+         customDomain: config
+       });
+       onUpdate({ ...site, customDomain: config });
+       setShowConfig(true);
+    } catch(e) {
+      console.error(e);
+      alert("Failed to save domain configuration");
+    }
+  };
+
+  const handleVerify = async () => {
+    setIsVerifying(true);
+    // Simulate DNS propagation delay
+    setTimeout(async () => {
+      try {
+        const updatedConfig: CustomDomainConfig = {
+          ...site.customDomain!,
+          status: 'verified',
+          verifiedAt: new Date().toISOString()
+        };
+        
+        await updateDoc(doc(db, "users", user.uid, "sites", site.id!), {
+          customDomain: updatedConfig
+        });
+        
+        onUpdate({ ...site, customDomain: updatedConfig });
+        setIsVerifying(false);
+      } catch (e) {
+        console.error(e);
+        alert("Verification failed. Please try again.");
+        setIsVerifying(false);
+      }
+    }, 2000);
+  };
+
+  if (site.customDomain?.status === 'verified') {
+    return (
+      <div className="p-4 bg-green-50 rounded-xl border border-green-100 animate-fade-in">
+         <div className="flex items-center gap-2 mb-2">
+           <ShieldCheck size={18} className="text-green-600" />
+           <h4 className="font-bold text-green-900">Custom Domain Active</h4>
+         </div>
+         <p className="text-sm text-green-800 mb-3">
+           Your site is live at:
+         </p>
+         <div className="bg-white p-2 rounded border border-green-200 text-green-700 font-mono text-sm flex justify-between items-center">
+           <a href={`https://${site.customDomain.domain}`} target="_blank" rel="noreferrer" className="hover:underline">
+             {site.customDomain.domain}
+           </a>
+           <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full font-bold">HTTPS Secure</span>
+         </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t border-gray-200 pt-4 mt-4">
+       <h4 className="font-bold text-gray-900 mb-2 flex items-center gap-2">
+         <Globe size={16} /> Connect Custom Domain
+       </h4>
+       
+       {!site.customDomain ? (
+         <div className="space-y-2">
+           <input 
+             type="text" 
+             placeholder="e.g. mysite.com" 
+             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+             value={domainInput}
+             onChange={(e) => setDomainInput(e.target.value)}
+           />
+           <Button onClick={handleConnect} disabled={!domainInput} className="w-full py-2 text-sm">
+             Connect Domain
+           </Button>
+         </div>
+       ) : (
+         <div className="space-y-4">
+           <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-xs text-yellow-800 flex items-start gap-2">
+             <AlertCircle size={14} className="mt-0.5 shrink-0" />
+             <p>Add the following records to your domain provider's DNS settings to verify ownership.</p>
+           </div>
+           
+           <div className="space-y-2">
+             {site.customDomain.dnsRecords.map((record, i) => (
+               <div key={i} className="bg-gray-50 p-2 rounded border border-gray-200 text-xs">
+                  <div className="flex justify-between mb-1">
+                    <span className="font-bold text-gray-700">{record.type} Record</span>
+                    <span className="text-gray-400 font-mono">Name: {record.name}</span>
+                  </div>
+                  <div className="font-mono bg-white p-1 rounded border border-gray-100 text-gray-600 break-all select-all">
+                    {record.value}
+                  </div>
+               </div>
+             ))}
+           </div>
+
+           <div className="flex gap-2">
+             <Button onClick={handleVerify} disabled={isVerifying} className="flex-1 py-2 text-sm bg-green-600 hover:bg-green-700">
+               {isVerifying ? <Loader2 className="animate-spin w-4 h-4"/> : <><RefreshCw size={14}/> Verify DNS</>}
+             </Button>
+             <button 
+               onClick={async () => {
+                 await updateDoc(doc(db, "users", user.uid, "sites", site.id!), { customDomain: null as any }); // Cast to delete
+                 onUpdate({ ...site, customDomain: undefined });
+               }} 
+               className="px-3 py-2 text-red-600 text-xs hover:bg-red-50 rounded-lg"
+             >
+               Cancel
+             </button>
+           </div>
+         </div>
+       )}
+    </div>
+  );
+};
+
+
 // --- Dashboard / Tool ---
 
 const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
@@ -301,6 +455,11 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
         alert("Database Permission Error: Please update your Firestore Rules to allow access to users/{uid}/sites.");
       }
     }
+  };
+
+  const handleSiteUpdate = (updatedSite: SiteData) => {
+    setCurrentSite(updatedSite);
+    setSites(prev => prev.map(s => s.id === updatedSite.id ? updatedSite : s));
   };
 
   const generateSite = async () => {
@@ -726,13 +885,16 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
                                    <div className="text-xs font-bold text-blue-600 uppercase mb-1">Public Preview URL</div>
                                    <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-blue-200 text-xs text-gray-600 shadow-sm">
                                      <Globe size={12} className="text-blue-400 shrink-0" />
-                                     <span className="truncate flex-1">{window.location.origin}/#{currentSite.content.slug || 'site'}/{user.uid}/{currentSite.id}</span>
+                                     <span className="truncate flex-1">{window.location.origin}/#{currentSite.content.slug || 'site'}/{user.uid}/${currentSite.id}</span>
                                      <button onClick={copyLink} className="p-1 hover:bg-gray-100 rounded text-gray-500 transition-colors">
                                        {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
                                      </button>
                                    </div>
                                    <a href={`/#${currentSite.content.slug || 'site'}/${user.uid}/${currentSite.id}`} target="_blank" className="block text-center text-xs text-blue-600 hover:underline mt-2">Open in New Tab</a>
                                 </div>
+                                
+                                <DomainManager site={currentSite} user={user} onUpdate={handleSiteUpdate} />
+
                             </div>
                          ) : (
                              <Button onClick={publishSite} className="w-full bg-green-600 hover:bg-green-700 text-white shadow-lg text-sm py-2">
