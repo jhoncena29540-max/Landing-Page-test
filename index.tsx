@@ -424,9 +424,9 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
 
   const copyLink = () => {
     if(!currentSite?.id) return;
-    // New URL structure: #p/{userId}/{siteId}/{slug}
+    // New URL structure: #/{slug}/{userId}/{siteId}
     const slug = currentSite.content.slug || 'web-page';
-    const url = `${window.location.origin}/#p/${user.uid}/${currentSite.id}/${slug}`;
+    const url = `${window.location.origin}/#${slug}/${user.uid}/${currentSite.id}`;
     navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -619,7 +619,7 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
                       </button>
                       {site.isPublished && (
                          <a 
-                           href={`#p/${site.userId}/${site.id}/${site.content.slug || 'site'}`}
+                           href={`#${site.content.slug || 'site'}/${site.userId}/${site.id}`}
                            target="_blank"
                            rel="noreferrer"
                            className="flex-1 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-100 text-center transition-all"
@@ -726,12 +726,12 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
                                    <div className="text-xs font-bold text-blue-600 uppercase mb-1">Public Preview URL</div>
                                    <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-blue-200 text-xs text-gray-600 shadow-sm">
                                      <Globe size={12} className="text-blue-400 shrink-0" />
-                                     <span className="truncate flex-1">{window.location.origin}/#p/{user.uid}/{currentSite.id}/{currentSite.content.slug || 'site'}</span>
+                                     <span className="truncate flex-1">{window.location.origin}/#{currentSite.content.slug || 'site'}/{user.uid}/{currentSite.id}</span>
                                      <button onClick={copyLink} className="p-1 hover:bg-gray-100 rounded text-gray-500 transition-colors">
                                        {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
                                      </button>
                                    </div>
-                                   <a href={`/#p/${user.uid}/${currentSite.id}/${currentSite.content.slug || 'site'}`} target="_blank" className="block text-center text-xs text-blue-600 hover:underline mt-2">Open in New Tab</a>
+                                   <a href={`/#${currentSite.content.slug || 'site'}/${user.uid}/${currentSite.id}`} target="_blank" className="block text-center text-xs text-blue-600 hover:underline mt-2">Open in New Tab</a>
                                 </div>
                             </div>
                          ) : (
@@ -771,7 +771,7 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
                       <div className="w-3 h-3 rounded-full bg-green-400"></div>
                     </div>
                     <div className="h-8 bg-gray-100 rounded-md text-xs flex items-center px-3 text-gray-400 w-64 border border-gray-200 font-mono">
-                      {currentSite ? `${window.location.host}/p/${user.uid.slice(0,5)}/${currentSite.content.slug || 'preview'}` : 'waiting...'}
+                      {currentSite ? `${window.location.host}/${currentSite.content.slug || 'preview'}` : 'waiting...'}
                     </div>
                  </div>
                  <div className="flex items-center gap-4">
@@ -1062,7 +1062,8 @@ const App = () => {
   const [loadingTitle, setLoadingTitle] = useState("LaunchAI"); // State for custom loading text
   const [view, setView] = useState<'landing' | 'auth' | 'dashboard' | 'public_site'>(
     // Initialize view state based on hash to avoid flash of landing page
-    window.location.hash.startsWith('#p/') ? 'public_site' : 'landing'
+    // New format check: #slug/uid/id (at least 2 slashes)
+    window.location.hash.split('/').length >= 3 ? 'public_site' : 'landing'
   );
   const [authType, setAuthType] = useState<'signin' | 'signup'>('signin');
   const [publicSiteData, setPublicSiteData] = useState<GeneratedSiteContent | null>(null);
@@ -1071,57 +1072,55 @@ const App = () => {
     // Hash Routing Logic for Public Sites
     const checkHash = async () => {
       const hash = window.location.hash;
-      // New format: #p/{userId}/{siteId}/{slug}
-      if (hash.startsWith('#p/')) {
-        // If we are already viewing public site, loading handles itself, otherwise ensure loading is on
-        if(view !== 'public_site') setLoading(true);
-        
-        const parts = hash.replace('#p/', '').split('/');
-        
-        // Optimistic Title Setting from URL Slug
-        if (parts.length >= 3) {
-             const slug = parts[2];
-             // Format slug: my-cool-site -> My Cool Site
-             const formattedTitle = slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-             setLoadingTitle(formattedTitle);
-        } else {
-             setLoadingTitle("Site");
-        }
+      // New format: #{slug}/{userId}/{siteId}
+      
+      if (hash.length > 2) { // Has content
+         // Clean hash: remove leading # and potential slash
+         const cleanPath = hash.replace(/^#\/?/, '');
+         const parts = cleanPath.split('/');
 
-        if (parts.length >= 2) {
-           const userId = parts[0];
-           const siteId = parts[1];
-           
-           try {
-             // Look in the specific user's subcollection
-             const docRef = doc(db, "users", userId, "sites", siteId);
-             const docSnap = await getDoc(docRef);
-             
-             if (docSnap.exists()) {
-                const data = docSnap.data() as SiteData;
-                if (data.isPublished) {
-                  setPublicSiteData(data.content);
-                  // Update tab title
-                  document.title = data.content.title;
-                  setView('public_site');
+         // We expect: [slug, userId, siteId]
+         if (parts.length >= 3) {
+            const slug = parts[0];
+            const userId = parts[1];
+            const siteId = parts[2];
+
+            if(view !== 'public_site') setLoading(true);
+
+            // Optimistic Title Setting from URL Slug
+            const formattedTitle = slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            setLoadingTitle(formattedTitle);
+
+            try {
+                // Look in the specific user's subcollection
+                const docRef = doc(db, "users", userId, "sites", siteId);
+                const docSnap = await getDoc(docRef);
+                
+                if (docSnap.exists()) {
+                   const data = docSnap.data() as SiteData;
+                   if (data.isPublished) {
+                     setPublicSiteData(data.content);
+                     // Update tab title
+                     document.title = data.content.title;
+                     setView('public_site');
+                   } else {
+                     alert("This site is not yet published by the author.");
+                     window.location.hash = '';
+                     setView('landing');
+                   }
                 } else {
-                  alert("This site is not yet published by the author.");
-                  window.location.hash = '';
-                  setView('landing');
+                   alert("Site not found. Check the URL and try again.");
+                   window.location.hash = '';
+                   setView('landing');
                 }
-             } else {
-                alert("Site not found. Check the URL and try again.");
-                window.location.hash = '';
+            } catch (e) {
+                console.error(e);
                 setView('landing');
-             }
-           } catch (e) {
-             console.error(e);
-             setView('landing');
-           } finally {
-             setLoading(false);
-           }
-           return true; // handled
-        }
+            } finally {
+                setLoading(false);
+            }
+            return true; // handled
+         }
       }
       return false; // not handled
     };
@@ -1144,7 +1143,8 @@ const App = () => {
       }
 
       // Important: Check hash BEFORE changing loading state or view
-      const isPublicLink = window.location.hash.startsWith('#p/');
+      // We check for the slash based format
+      const isPublicLink = window.location.hash.split('/').length >= 3;
       
       if (!isPublicLink) {
         if (currentUser) {
