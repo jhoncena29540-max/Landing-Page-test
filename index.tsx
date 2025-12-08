@@ -105,7 +105,7 @@ const PRO_PROMPTS = [
 ];
 
 // --- Gemini AI Setup ---
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "AIzaSyAWE6sCwZZZP3V-K-gHIeqNQh_z6uuk6eE" });
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "AIzaSyAmMDkMjyK1D-hPQtO1A6Qmt_19mC5cWjI" });
 
 // --- Components ---
 
