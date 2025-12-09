@@ -581,11 +581,24 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
     }
   };
 
+  const getPublicUrl = () => {
+    if (!currentSite) return '';
+    // Construct the public URL using the slug or title
+    const rawSlug = currentSite.content.slug || currentSite.title || 'site';
+    const slug = rawSlug.trim().toLowerCase()
+      .replace(/\s+/g, '-')     // Replace spaces with -
+      .replace(/[^\w\-]+/g, '') // Remove all non-word chars
+      .replace(/\-\-+/g, '-')   // Replace multiple - with single -
+      .replace(/^-+/, '')       // Trim - from start
+      .replace(/-+$/, '');      // Trim - from end
+      
+    // Format: https://landing-page-t.vercel.app/{{slug}}
+    return `https://landing-page-t.vercel.app/${slug}`;
+  };
+
   const copyLink = () => {
-    if(!currentSite?.id) return;
-    // New URL structure: #/{slug}/{userId}/{siteId}
-    const slug = currentSite.content.slug || 'web-page';
-    const url = `${window.location.origin}/#${slug}/${user.uid}/${currentSite.id}`;
+    const url = getPublicUrl();
+    if (!url) return;
     navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -778,7 +791,7 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
                       </button>
                       {site.isPublished && (
                          <a 
-                           href={`#${site.content.slug || 'site'}/${site.userId}/${site.id}`}
+                           href={`https://landing-page-t.vercel.app/${site.content.slug || site.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
                            target="_blank"
                            rel="noreferrer"
                            className="flex-1 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-100 text-center transition-all"
@@ -885,12 +898,12 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
                                    <div className="text-xs font-bold text-blue-600 uppercase mb-1">Public Preview URL</div>
                                    <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-blue-200 text-xs text-gray-600 shadow-sm">
                                      <Globe size={12} className="text-blue-400 shrink-0" />
-                                     <span className="truncate flex-1">{window.location.origin}/#{currentSite.content.slug || 'site'}/{user.uid}/${currentSite.id}</span>
+                                     <span className="truncate flex-1">{getPublicUrl()}</span>
                                      <button onClick={copyLink} className="p-1 hover:bg-gray-100 rounded text-gray-500 transition-colors">
                                        {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
                                      </button>
                                    </div>
-                                   <a href={`/#${currentSite.content.slug || 'site'}/${user.uid}/${currentSite.id}`} target="_blank" className="block text-center text-xs text-blue-600 hover:underline mt-2">Open in New Tab</a>
+                                   <a href={getPublicUrl()} target="_blank" className="block text-center text-xs text-blue-600 hover:underline mt-2">Open in New Tab</a>
                                 </div>
                                 
                                 <DomainManager site={currentSite} user={user} onUpdate={handleSiteUpdate} />
@@ -933,7 +946,7 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
                       <div className="w-3 h-3 rounded-full bg-green-400"></div>
                     </div>
                     <div className="h-8 bg-gray-100 rounded-md text-xs flex items-center px-3 text-gray-400 w-64 border border-gray-200 font-mono">
-                      {currentSite ? `${window.location.host}/${currentSite.content.slug || 'preview'}` : 'waiting...'}
+                      {currentSite ? getPublicUrl() : 'waiting...'}
                     </div>
                  </div>
                  <div className="flex items-center gap-4">
