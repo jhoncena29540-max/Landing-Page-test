@@ -51,9 +51,6 @@ interface SiteData {
   isPublished: boolean;
   createdAt: any;
   customDomain?: CustomDomainConfig;
-  slug?: string;
-  originalId?: string;
-  authorId?: string;
 }
 
 interface GeneratedSiteContent {
@@ -570,29 +567,12 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
   const publishSite = async () => {
     if (!currentSite || !currentSite.id) return;
     const siteId = currentSite.id;
-    // Ensure we have a valid slug
-    const rawSlug = currentSite.content.slug || currentSite.title || 'site-' + siteId;
-    const slug = rawSlug.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '');
-
     try {
-      // 1. Update in users/{uid}/sites subcollection (Owner copy)
+      // Update in users/{uid}/sites subcollection
       await updateDoc(doc(db, "users", user.uid, "sites", siteId), {
-        isPublished: true,
-        slug: slug
+        isPublished: true
       });
-
-      // 2. Publish to root 'published_sites' collection for public access
-      // This solves the permission error by using a public-readable root collection
-      await setDoc(doc(db, "published_sites", slug), {
-        ...currentSite,
-        isPublished: true,
-        slug: slug,
-        authorId: user.uid,
-        originalId: siteId,
-        updatedAt: serverTimestamp()
-      });
-
-      const updatedSite = { ...currentSite, isPublished: true, slug };
+      const updatedSite = { ...currentSite, isPublished: true };
       setCurrentSite(updatedSite);
       setSites(sites.map(s => s.id === siteId ? updatedSite : s));
     } catch (e) {
@@ -601,16 +581,11 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
     }
   };
 
-  const getPublicUrl = () => {
-    if (!currentSite) return '';
-    const slug = currentSite.slug || currentSite.content.slug || 'site';
-    // Return path-based URL: domain.com/appco-landing-page/slug
-    return `${window.location.origin}/appco-landing-page/${slug}`;
-  };
-
   const copyLink = () => {
-    const url = getPublicUrl();
-    if(!url) return;
+    if(!currentSite?.id) return;
+    // New URL structure: #/{slug}/{userId}/{siteId}
+    const slug = currentSite.content.slug || 'web-page';
+    const url = `${window.location.origin}/#${slug}/${user.uid}/${currentSite.id}`;
     navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -803,7 +778,7 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
                       </button>
                       {site.isPublished && (
                          <a 
-                           href={`${window.location.origin}/appco-landing-page/${site.slug || site.content.slug}`}
+                           href={`#${site.content.slug || 'site'}/${site.userId}/${site.id}`}
                            target="_blank"
                            rel="noreferrer"
                            className="flex-1 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-100 text-center transition-all"
@@ -910,12 +885,12 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
                                    <div className="text-xs font-bold text-blue-600 uppercase mb-1">Public Preview URL</div>
                                    <div className="flex items-center gap-2 bg-white p-2 rounded-lg border border-blue-200 text-xs text-gray-600 shadow-sm">
                                      <Globe size={12} className="text-blue-400 shrink-0" />
-                                     <span className="truncate flex-1">{getPublicUrl()}</span>
+                                     <span className="truncate flex-1">{window.location.origin}/#{currentSite.content.slug || 'site'}/{user.uid}/${currentSite.id}</span>
                                      <button onClick={copyLink} className="p-1 hover:bg-gray-100 rounded text-gray-500 transition-colors">
                                        {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
                                      </button>
                                    </div>
-                                   <a href={getPublicUrl()} target="_blank" className="block text-center text-xs text-blue-600 hover:underline mt-2">Open in New Tab</a>
+                                   <a href={`/#${currentSite.content.slug || 'site'}/${user.uid}/${currentSite.id}`} target="_blank" className="block text-center text-xs text-blue-600 hover:underline mt-2">Open in New Tab</a>
                                 </div>
                                 
                                 <DomainManager site={currentSite} user={user} onUpdate={handleSiteUpdate} />
@@ -958,7 +933,7 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
                       <div className="w-3 h-3 rounded-full bg-green-400"></div>
                     </div>
                     <div className="h-8 bg-gray-100 rounded-md text-xs flex items-center px-3 text-gray-400 w-64 border border-gray-200 font-mono">
-                      {currentSite ? getPublicUrl() : 'waiting...'}
+                      {currentSite ? `${window.location.host}/${currentSite.content.slug || 'preview'}` : 'waiting...'}
                     </div>
                  </div>
                  <div className="flex items-center gap-4">
@@ -1246,113 +1221,59 @@ const App = () => {
   const [user, setUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<string>('user');
   const [loading, setLoading] = useState(true);
-  const [loadingTitle, setLoadingTitle] = useState("LaunchAI");
-  const [view, setView] = useState<'landing' | 'auth' | 'dashboard' | 'public_site'>('landing');
+  const [loadingTitle, setLoadingTitle] = useState("LaunchAI"); // State for custom loading text
+  const [view, setView] = useState<'landing' | 'auth' | 'dashboard' | 'public_site'>(
+    // Initialize view state based on hash to avoid flash of landing page
+    // New format check: #slug/uid/id (at least 2 slashes)
+    window.location.hash.split('/').length >= 3 ? 'public_site' : 'landing'
+  );
   const [authType, setAuthType] = useState<'signin' | 'signup'>('signin');
   const [publicSiteData, setPublicSiteData] = useState<GeneratedSiteContent | null>(null);
 
   useEffect(() => {
-    // Advanced Routing Logic: Path vs Hash
-    const checkRoute = async () => {
-      const path = window.location.pathname;
+    // Hash Routing Logic for Public Sites
+    const checkHash = async () => {
       const hash = window.location.hash;
-
-      // Priority 1: Clean URL Path
-      if (path && path !== '/' && path !== '/index.html') {
-         // Handle /appco-landing-page/{pageId} or /appco-landing-page (default) or /slug
-         // We check if the path starts with /appco-landing-page
-         if (path.startsWith('/appco-landing-page')) {
-             setLoading(true);
-             const segments = path.split('/').filter(p => p); 
-             // Find 'appco-landing-page' in segments
-             const baseIndex = segments.indexOf('appco-landing-page');
-             
-             // Check if there is a segment after it. If not, default to 'default'.
-             let targetSlug = 'default';
-             if (baseIndex !== -1 && segments[baseIndex + 1]) {
-                 targetSlug = segments[baseIndex + 1];
-             }
-             
-             setLoadingTitle(targetSlug.replace(/-/g, ' '));
-
-             try {
-                // TRY DIRECT FETCH FIRST (From 'published_sites' root collection)
-                let docRef = doc(db, "published_sites", targetSlug);
-                let docSnap = await getDoc(docRef);
-
-                if (docSnap.exists()) {
-                   const siteData = docSnap.data() as SiteData;
-                   setPublicSiteData(siteData.content);
-                   document.title = siteData.content.title;
-                   setView('public_site');
-                } else {
-                   // If specific slug not found or 'default' not found
-                   console.log(`Site ${targetSlug} not found in published_sites.`);
-                   // Graceful fallback to Marketing Landing Page
-                   setView('landing'); 
-                }
-             } catch (e) {
-                console.error("Routing Error:", e);
-                // Graceful fallback on error
-                setView('landing');
-             } finally {
-                setLoading(false);
-             }
-             return; 
-         }
-      }
+      // New format: #{slug}/{userId}/{siteId}
       
-      // Priority 2: Hash Routing (Legacy or fallback: #/slug/uid/id)
-      if (hash.length > 2) {
+      if (hash.length > 2) { // Has content
          // Clean hash: remove leading # and potential slash
          const cleanPath = hash.replace(/^#\/?/, '');
          const parts = cleanPath.split('/');
 
-         if (parts.length > 0) {
+         // We expect: [slug, userId, siteId]
+         if (parts.length >= 3) {
             const slug = parts[0];
             const userId = parts[1];
             const siteId = parts[2];
 
-            setLoading(true);
-            setLoadingTitle(slug);
+            if(view !== 'public_site') setLoading(true);
+
+            // Optimistic Title Setting from URL Slug
+            const formattedTitle = slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            setLoadingTitle(formattedTitle);
 
             try {
-                let docSnap;
-                if (userId && siteId) {
-                   // Direct lookup if we have ID - likely fails if permissions are tight
-                   const docRef = doc(db, "users", userId, "sites", siteId);
-                   try {
-                     docSnap = await getDoc(docRef);
-                   } catch(err) {
-                     // Ignore permission error here and try public fetch below
-                     console.log("Direct fetch failed, trying public...");
-                   }
-                }
+                // Look in the specific user's subcollection
+                const docRef = doc(db, "users", userId, "sites", siteId);
+                const docSnap = await getDoc(docRef);
                 
-                if (docSnap && docSnap.exists()) {
+                if (docSnap.exists()) {
                    const data = docSnap.data() as SiteData;
                    if (data.isPublished) {
                      setPublicSiteData(data.content);
+                     // Update tab title
                      document.title = data.content.title;
                      setView('public_site');
                    } else {
-                     alert("This site is not yet published.");
+                     alert("This site is not yet published by the author.");
                      window.location.hash = '';
                      setView('landing');
                    }
                 } else {
-                    // Try published_sites first for hash routes too if direct failed
-                    // Or if only slug provided
-                    const lookupSlug = slug || 'default';
-                    let docRef = doc(db, "published_sites", lookupSlug);
-                    let pubSnap = await getDoc(docRef);
-                    
-                    if (pubSnap.exists()) {
-                        setPublicSiteData(pubSnap.data().content);
-                        setView('public_site');
-                    } else {
-                        setView('landing');
-                    }
+                   alert("Site not found. Check the URL and try again.");
+                   window.location.hash = '';
+                   setView('landing');
                 }
             } catch (e) {
                 console.error(e);
@@ -1360,18 +1281,17 @@ const App = () => {
             } finally {
                 setLoading(false);
             }
-            return;
+            return true; // handled
          }
       }
-      
-      // Default: Not a public route, just finish loading
-      setLoading(false);
+      return false; // not handled
     };
 
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       
       if (currentUser) {
+        // Fetch user role from Firestore
         try {
           const userRef = doc(db, "users", currentUser.uid);
           const userSnap = await getDoc(userRef);
@@ -1384,28 +1304,31 @@ const App = () => {
         }
       }
 
-      // Check URL route before deciding on default view
-      const path = window.location.pathname;
-      const isRouteHandled = (path.includes('/appco-landing-page') || window.location.hash.length > 2);
-
-      if (!isRouteHandled) {
-          if (currentUser) {
-            setView('dashboard');
-          } else {
-            if(view !== 'auth') setView('landing');
-          }
-          setLoading(false);
+      // Important: Check hash BEFORE changing loading state or view
+      // We check for the slash based format
+      const isPublicLink = window.location.hash.split('/').length >= 3;
+      
+      if (!isPublicLink) {
+        if (currentUser) {
+          setView('dashboard');
+        } else {
+          if(view !== 'auth') setView('landing');
+        }
+        setLoading(false);
+      } else {
+        // If it is a public link, let checkHash handle the loading state
+        // We do NOT set loading(false) here, or we will get a flash
       }
     });
 
-    checkRoute();
-    window.addEventListener('popstate', checkRoute); // Handle back/forward
-    
+    checkHash();
+    window.addEventListener('hashchange', checkHash);
+
     return () => {
       unsubscribe();
-      window.removeEventListener('popstate', checkRoute);
+      window.removeEventListener('hashchange', checkHash);
     };
-  }, []); 
+  }, []); // Empty dependency array to run once on mount
 
   if (loading) {
     return <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 text-gray-500">
