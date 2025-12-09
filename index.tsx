@@ -1260,14 +1260,14 @@ const App = () => {
       // Priority 1: Clean URL Path
       if (path && path !== '/' && path !== '/index.html') {
          // Handle /appco-landing-page/{pageId} or /appco-landing-page (default) or /slug
-         // Assuming deployment is at root / but could be specific subpaths
-         if (path.includes('/appco-landing-page')) {
+         // We check if the path starts with /appco-landing-page
+         if (path.startsWith('/appco-landing-page')) {
              setLoading(true);
              const segments = path.split('/').filter(p => p); 
              // Find 'appco-landing-page' in segments
              const baseIndex = segments.indexOf('appco-landing-page');
              
-             // Check if there is a segment after it
+             // Check if there is a segment after it. If not, default to 'default'.
              let targetSlug = 'default';
              if (baseIndex !== -1 && segments[baseIndex + 1]) {
                  targetSlug = segments[baseIndex + 1];
@@ -1277,7 +1277,6 @@ const App = () => {
 
              try {
                 // TRY DIRECT FETCH FIRST (From 'published_sites' root collection)
-                // This bypasses the collectionGroup permission issues on public sites.
                 let docRef = doc(db, "published_sites", targetSlug);
                 let docSnap = await getDoc(docRef);
 
@@ -1287,18 +1286,14 @@ const App = () => {
                    document.title = siteData.content.title;
                    setView('public_site');
                 } else {
-                   // If default wasn't found and no specific slug was provided (targetSlug is 'default'), 
-                   // showing 404 is bad UX for base URL. Show Landing.
-                   if (targetSlug === 'default') {
-                       setView('landing');
-                   } else {
-                       // Specific slug not found
-                       console.log(`Site ${targetSlug} not found in published_sites.`);
-                       setView('landing'); 
-                   }
+                   // If specific slug not found or 'default' not found
+                   console.log(`Site ${targetSlug} not found in published_sites.`);
+                   // Graceful fallback to Marketing Landing Page
+                   setView('landing'); 
                 }
              } catch (e) {
                 console.error("Routing Error:", e);
+                // Graceful fallback on error
                 setView('landing');
              } finally {
                 setLoading(false);
@@ -1326,7 +1321,12 @@ const App = () => {
                 if (userId && siteId) {
                    // Direct lookup if we have ID - likely fails if permissions are tight
                    const docRef = doc(db, "users", userId, "sites", siteId);
-                   docSnap = await getDoc(docRef);
+                   try {
+                     docSnap = await getDoc(docRef);
+                   } catch(err) {
+                     // Ignore permission error here and try public fetch below
+                     console.log("Direct fetch failed, trying public...");
+                   }
                 }
                 
                 if (docSnap && docSnap.exists()) {

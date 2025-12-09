@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if the current user has the 'admin' role
+    function isAdmin() {
+      return request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    match /users/{userId} {
+      // READ: Users can read their own profile; Admins can read all profiles
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+
+      // CREATE: Allow signup, but FORCE the role to be 'user'
+      allow create: if request.auth != null 
+                    && request.auth.uid == userId
+                    && request.resource.data.role == 'user';
+
+      // UPDATE: Users can update their profile, but CANNOT change their role
+      allow update: if request.auth != null 
+                    && request.auth.uid == userId
+                    && (
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['email', 'displayName', 'photoURL', 'updatedAt']) 
+                      || request.resource.data.role == resource.data.role
+                    );
+
+      // ADMIN WRITE: Admins can update/delete any user document
+      allow write: if isAdmin();
+
+      match /sites/{siteId} {
+        // Owner has full access
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+        // Public read access ONLY if published (legacy support)
+        allow read: if resource.data.isPublished == true;
+      }
+    }
+
+    // NEW: Public Sites Collection for Clean URLs and Public Access
+    match /published_sites/{slug} {
+      // Public Read Access
+      allow read: if true;
+      
+      // Write Access: Author or Admin
+      allow create: if request.auth != null && request.resource.data.authorId == request.auth.uid;
+      allow update: if request.auth != null && (request.resource.data.authorId == request.auth.uid || isAdmin());
+      allow delete: if request.auth != null && (resource.data.authorId == request.auth.uid || isAdmin());
+    }
+  }
+}
