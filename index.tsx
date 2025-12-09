@@ -16,11 +16,7 @@ import {
   doc, 
   getDoc, 
   serverTimestamp,
-  setDoc,
-  collectionGroup,
-  query,
-  where,
-  limit
+  setDoc
 } from "firebase/firestore";
 import { auth, db } from './firebase';
 import { 
@@ -56,6 +52,8 @@ interface SiteData {
   createdAt: any;
   customDomain?: CustomDomainConfig;
   slug?: string;
+  originalId?: string;
+  authorId?: string;
 }
 
 interface GeneratedSiteContent {
@@ -544,23 +542,13 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
 
       const content = JSON.parse(response.text || "{}");
       
-      // Sanitized root slug for querying
-      const rawSlug = content.slug || content.title || prompt.slice(0, 30);
-      const cleanSlug = rawSlug.trim().toLowerCase()
-        .replace(/\s+/g, '-')
-        .replace(/[^\w\-]+/g, '')
-        .replace(/\-\-+/g, '-')
-        .replace(/^-+/, '')
-        .replace(/-+$/, '');
-
       const newSite: SiteData = {
         userId: user.uid,
         title: content.title || prompt.slice(0, 30),
         prompt: prompt,
         content: content,
         isPublished: false,
-        createdAt: serverTimestamp(),
-        slug: cleanSlug // Store root slug for easier lookup
+        createdAt: serverTimestamp()
       };
 
       // Add to users/{uid}/sites subcollection
@@ -582,12 +570,29 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
   const publishSite = async () => {
     if (!currentSite || !currentSite.id) return;
     const siteId = currentSite.id;
+    // Ensure we have a valid slug
+    const rawSlug = currentSite.content.slug || currentSite.title || 'site-' + siteId;
+    const slug = rawSlug.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '');
+
     try {
-      // Update in users/{uid}/sites subcollection
+      // 1. Update in users/{uid}/sites subcollection (Owner copy)
       await updateDoc(doc(db, "users", user.uid, "sites", siteId), {
-        isPublished: true
+        isPublished: true,
+        slug: slug
       });
-      const updatedSite = { ...currentSite, isPublished: true };
+
+      // 2. Publish to root 'published_sites' collection for public access
+      // This solves the permission error by using a public-readable root collection
+      await setDoc(doc(db, "published_sites", slug), {
+        ...currentSite,
+        isPublished: true,
+        slug: slug,
+        authorId: user.uid,
+        originalId: siteId,
+        updatedAt: serverTimestamp()
+      });
+
+      const updatedSite = { ...currentSite, isPublished: true, slug };
       setCurrentSite(updatedSite);
       setSites(sites.map(s => s.id === siteId ? updatedSite : s));
     } catch (e) {
@@ -598,18 +603,14 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
 
   const getPublicUrl = () => {
     if (!currentSite) return '';
-    // Construct the public URL using the slug
-    const slug = currentSite.slug || (currentSite.content.slug || currentSite.title || 'site').trim().toLowerCase()
-      .replace(/\s+/g, '-')
-      .replace(/[^\w\-]+/g, '');
-      
-    // Updated Domain
-    return `https://landing-lage-test-22.vercel.app/${slug}`;
+    const slug = currentSite.slug || currentSite.content.slug || 'site';
+    // Return path-based URL: domain.com/appco-landing-page/slug
+    return `${window.location.origin}/appco-landing-page/${slug}`;
   };
 
   const copyLink = () => {
     const url = getPublicUrl();
-    if (!url) return;
+    if(!url) return;
     navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -802,7 +803,7 @@ const Dashboard = ({ user, userRole }: { user: User, userRole: string }) => {
                       </button>
                       {site.isPublished && (
                          <a 
-                           href={`https://landing-lage-test-22.vercel.app/${site.slug || site.content.slug}`}
+                           href={`${window.location.origin}/appco-landing-page/${site.slug || site.content.slug}`}
                            target="_blank"
                            rel="noreferrer"
                            className="flex-1 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-100 text-center transition-all"
@@ -1256,59 +1257,62 @@ const App = () => {
       const path = window.location.pathname;
       const hash = window.location.hash;
 
-      // Priority 1: Clean URL Path (e.g. /my-site) - requires SPA fallback on host
+      // Priority 1: Clean URL Path
       if (path && path !== '/' && path !== '/index.html') {
-         const slug = path.substring(1).split('/')[0]; // simple slug check
-         if (slug) {
+         // Handle /appco-landing-page/{pageId} or /appco-landing-page (default) or /slug
+         // Assuming deployment is at root / but could be specific subpaths
+         if (path.includes('/appco-landing-page')) {
              setLoading(true);
-             setLoadingTitle(slug);
+             const segments = path.split('/').filter(p => p); 
+             // Find 'appco-landing-page' in segments
+             const baseIndex = segments.indexOf('appco-landing-page');
+             
+             // Check if there is a segment after it
+             let targetSlug = 'default';
+             if (baseIndex !== -1 && segments[baseIndex + 1]) {
+                 targetSlug = segments[baseIndex + 1];
+             }
+             
+             setLoadingTitle(targetSlug.replace(/-/g, ' '));
+
              try {
-                // Try to find by root slug (for new sites)
-                let q = query(collectionGroup(db, 'sites'), where('slug', '==', slug), limit(1));
-                let snapshot = await getDocs(q);
+                // TRY DIRECT FETCH FIRST (From 'published_sites' root collection)
+                // This bypasses the collectionGroup permission issues on public sites.
+                let docRef = doc(db, "published_sites", targetSlug);
+                let docSnap = await getDoc(docRef);
 
-                // Fallback for older sites: check inside content object
-                if (snapshot.empty) {
-                    q = query(collectionGroup(db, 'sites'), where('content.slug', '==', slug), limit(1));
-                    snapshot = await getDocs(q);
-                }
-
-                if (!snapshot.empty) {
-                   const siteData = snapshot.docs[0].data() as SiteData;
-                   if (siteData.isPublished) {
-                      setPublicSiteData(siteData.content);
-                      document.title = siteData.content.title;
-                      setView('public_site');
-                   } else {
-                      // Site exists but unpublished
-                      alert("This site is currently not published.");
-                      setView('landing');
-                   }
+                if (docSnap.exists()) {
+                   const siteData = docSnap.data() as SiteData;
+                   setPublicSiteData(siteData.content);
+                   document.title = siteData.content.title;
+                   setView('public_site');
                 } else {
-                   // Not found
-                   console.log("Site not found by slug:", slug);
-                   // Don't alert immediately on 404, just show landing
-                   setView('landing');
+                   // If default wasn't found and no specific slug was provided (targetSlug is 'default'), 
+                   // showing 404 is bad UX for base URL. Show Landing.
+                   if (targetSlug === 'default') {
+                       setView('landing');
+                   } else {
+                       // Specific slug not found
+                       console.log(`Site ${targetSlug} not found in published_sites.`);
+                       setView('landing'); 
+                   }
                 }
              } catch (e) {
                 console.error("Routing Error:", e);
-                // If index is missing, firebase throws error.
-                // We fallback to landing.
                 setView('landing');
              } finally {
                 setLoading(false);
              }
-             return;
+             return; 
          }
       }
-
-      // Priority 2: Hash Routing (Legacy or fallback: #/slug)
+      
+      // Priority 2: Hash Routing (Legacy or fallback: #/slug/uid/id)
       if (hash.length > 2) {
          // Clean hash: remove leading # and potential slash
          const cleanPath = hash.replace(/^#\/?/, '');
          const parts = cleanPath.split('/');
 
-         // Format: [slug, userId, siteId] OR just [slug]
          if (parts.length > 0) {
             const slug = parts[0];
             const userId = parts[1];
@@ -1320,7 +1324,7 @@ const App = () => {
             try {
                 let docSnap;
                 if (userId && siteId) {
-                   // Direct lookup if we have ID
+                   // Direct lookup if we have ID - likely fails if permissions are tight
                    const docRef = doc(db, "users", userId, "sites", siteId);
                    docSnap = await getDoc(docRef);
                 }
@@ -1336,25 +1340,19 @@ const App = () => {
                      window.location.hash = '';
                      setView('landing');
                    }
-                } else if (!userId) {
-                    // Hash contains only slug, try global lookup
-                    // Same logic as Path routing
-                     let q = query(collectionGroup(db, 'sites'), where('slug', '==', slug), limit(1));
-                     let snapshot = await getDocs(q);
-                     if (snapshot.empty) {
-                        q = query(collectionGroup(db, 'sites'), where('content.slug', '==', slug), limit(1));
-                        snapshot = await getDocs(q);
-                     }
-                     if (!snapshot.empty && snapshot.docs[0].data().isPublished) {
-                        setPublicSiteData(snapshot.docs[0].data().content);
-                        setView('public_site');
-                     } else {
-                        setView('landing');
-                     }
                 } else {
-                   alert("Site not found.");
-                   window.location.hash = '';
-                   setView('landing');
+                    // Try published_sites first for hash routes too if direct failed
+                    // Or if only slug provided
+                    const lookupSlug = slug || 'default';
+                    let docRef = doc(db, "published_sites", lookupSlug);
+                    let pubSnap = await getDoc(docRef);
+                    
+                    if (pubSnap.exists()) {
+                        setPublicSiteData(pubSnap.data().content);
+                        setView('public_site');
+                    } else {
+                        setView('landing');
+                    }
                 }
             } catch (e) {
                 console.error(e);
@@ -1387,7 +1385,8 @@ const App = () => {
       }
 
       // Check URL route before deciding on default view
-      const isRouteHandled = (window.location.pathname.length > 1 && window.location.pathname !== '/index.html') || window.location.hash.length > 2;
+      const path = window.location.pathname;
+      const isRouteHandled = (path.includes('/appco-landing-page') || window.location.hash.length > 2);
 
       if (!isRouteHandled) {
           if (currentUser) {
